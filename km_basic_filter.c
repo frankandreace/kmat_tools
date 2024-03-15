@@ -6,6 +6,18 @@
 #include <stdbool.h>
 #include <string.h>
 
+/*
+THIS FUNCTION TAKES AS INPUT A MATRIX OF KMERS (KMERS ARE ROWS, SAMPLES ARE COLUMNS) AND 
+RETURN A NEW MATRIX THAT SATISFIES THE DESIRED CONDITIONS:
+
+1 - A MINIMUM ABUNDANCE OF A KMER TO BE CONSIDERED PRESENT IN A SAMPLE
+2 - A MINIMUM NUMBER OF SAMPLES IN WHICH A KMER HAS TO BE ABSENT FROM
+3 - A MINIMUM NUMBER OF SAMPLES IN WHICH A KMER HAS TO HAVE ABUNDANCE > THAN THE ONE SET IN THE 1ST CONDITION
+
+CONDITION 2 AND 3 CAN BE SPECIFIED AS ABSOLUTE VALUE OR FRACTION OF THE SAMPLES.
+INPUT AND OUTPUT CAN BE SPECIFIED OR BE STDIN/OUT
+*/
+
 
 int main(int argc, char **argv) {
 
@@ -78,12 +90,14 @@ int main(int argc, char **argv) {
     return 0;
   }
 
+  // set the matrix file pointer to the standard input or to the path provided in the arguments (non option)
   FILE *matfile = strcmp(argv[optind],"-") ? fopen(argv[optind],"r") : stdin;
   if(matfile == NULL) { 
     fprintf(stderr,"[error] cannot open file \"%s\"\n",argv[optind]);
     return 1;
   }
 
+  // set the output file pointer to stdout or to the path provided in the options
   FILE *outfile = out_fname ? fopen(out_fname,"w") : stdout;
   if(outfile != stdout && outfile == NULL) {
     if(matfile != stdin){ fclose(matfile); }
@@ -93,32 +107,57 @@ int main(int argc, char **argv) {
 
   size_t n_samples = 0, n_kmers = 0, n_retrieved = 0;
 
+  // use two char arrays to store the line to be parsed. the 1st to parse the line, the second to write it on the output if to be retained
   char *line = NULL, *line_cpy = NULL;
   size_t line_size = 0, line_cpy_size = 0;
-  ssize_t ch_read = getline(&line, &line_size, matfile);
-  while(ch_read >= 0) {
 
+  // read a line and place into the char buffer
+  ssize_t ch_read = getline(&line, &line_size, matfile);
+  while(ch_read >= 0) {  // while char in the line 
+
+    // if the line copy array is smaller than the line one, resize it. Needed for the strcpy
     if(line_cpy_size < line_size) {
       line_cpy_size = line_size;
       line_cpy = (char*)realloc(line_cpy,line_cpy_size);
     }
+    // copy line into line_cpy
     line_cpy = strcpy(line_cpy,line);
 
-    char *elem = strtok(line," \t\n");
-    if(elem == NULL){ continue; } // skip empty lines
+    // tockenize (split) the string based on ' '(space), '\t'(tab) or '\n'(newline) 
+    char *elem = strtok(line," \t\n"); 
+    if(elem == NULL){ continue; } // skip empty lines (if no token returned)
+    
+    // IF LINE NOT EMPTY 
+    
+    // record seeing a new kmer 
     ++n_kmers;
 
     size_t n_zeros = 0, n_present = 0;
-    while((elem = strtok(NULL," \t\n")) != NULL) {
+    
+    // While there are elements in the current line
+    while((elem = strtok(NULL," \t\n")) != NULL) { 
+
+      // when reading the first kmer, recod how many columns (samples) are in the matrix
       if(n_kmers == 1){ 
-        ++n_samples; 
+        ++n_samples;  
       }
+
+      // convert element into a base_10 long integer
       long val = strtol(elem,NULL,10);
+      
+      // add zeros (if == 0 ) or present (if > minimum abundance)
       if(val == 0){ ++n_zeros; } else if(val >= min_abund){ ++n_present; }
     }
 
+    // check conditions to record the kmer row
+    
+    // check if there were enough kmers with zero in the row (based on frequency or absolute count)
     bool enough_zeros = (min_zero_frac_opt && n_zeros >= min_zero_frac*n_samples) || (!min_zero_frac_opt && n_zeros >= min_zeros);
+
+    // check if there were enough kmers with values grater than the minimum abundance in the row (based on frequency or absolute count)
     bool enough_nz = (min_nz_frac_opt && n_present >= min_nz_frac*n_samples) || (!min_nz_frac_opt && n_present >= min_nz);
+
+    // in case both options are true, the row is retrieved and written to the output filestream
     if(enough_zeros && enough_nz) {
       ++n_retrieved;
       fputs(line_cpy, outfile);
@@ -127,6 +166,8 @@ int main(int argc, char **argv) {
     if(verbose_opt && (n_kmers & ((1U<<20)-1)) == 0) {
       fprintf(stderr, "%lu k-mers processed, %lu retrieved\n", n_kmers, n_retrieved);
     }
+
+    // get the next line to be processed
     ch_read = getline(&line, &line_size, matfile);
   }
 
@@ -134,6 +175,7 @@ int main(int argc, char **argv) {
   fprintf(stderr, "[info] %lu\ttotal k-mers\n", n_kmers);
   fprintf(stderr, "[info] %lu\tretained k-mers\n", n_retrieved);
 
+  // cleaning up - freeing the memory for the arrays and closing the filestreams
   free(line); free(line_cpy);
   if(matfile != stdin){ fclose(matfile); }
   if(outfile != stdout){ fclose(outfile); }
